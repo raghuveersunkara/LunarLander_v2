@@ -1,31 +1,37 @@
-import gym
+import random
 from memory import Memory
 from tuple import Tuple
+import torch
+import numpy as np
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class ReplayBuffer(object):
-    def __init__(self, max_size, envName='LunarLander-v2', preTrainLen=100, episodeMaxRunSteps=100):
-        self.memory = Memory(max_size)
-        self.envName = envName
-        self.preTrainLen = preTrainLen
-        self.episodeMaxRunSteps = episodeMaxRunSteps
+	def __init__(self, action_size, buffer_size, batch_size, seed):
+		self.action_size = action_size
+		self.replay_memory = Memory(max_size=buffer_size)
+		self.batch_size = batch_size
+		self.seed = random.seed(seed)
+		self.batch_size = batch_size
 
-    def fillReplayBuffer(self):
-        env = gym.make(self.envName)
-        for episode in range(self.preTrainLen):
-            observation = env.reset()
-            for t in range(self.episodeMaxRunSteps):
-                env.render()
-                action = env.action_space.sample()
-                observation, reward, done, info = env.step(action)
-                tuple = Tuple(action, observation, reward, info, done)
-                self.memory.add(tuple)
-                if done:
-                    break
-        return self.memory
+	def fill_replay_buffer(self, current_state, action, reward, next_state, done):
+		tuple = Tuple(current_state, action, reward, next_state, done)
+		self.replay_memory.add(tuple)
 
+	#
+	def get_sample_replay_buffer(self):
+		"""Get a random sample batch of experiences from stored memory"""
+		samples = self.replay_memory.sample(self.batch_size)
 
-if __name__ == "__main__":
-    replayBuffer = ReplayBuffer(100, preTrainLen=1)
-    memo = replayBuffer.fillReplayBuffer()
-    print(memo.sample(4))
+		states = torch.from_numpy(np.vstack([s.current_state for s in samples if s is not None])).float().to(device)
+		actions = torch.from_numpy(np.vstack([s.action for s in samples if s is not None])).long().to(device)
+		rewards = torch.from_numpy(np.vstack([s.reward for s in samples if s is not None])).float().to(device)
+		next_states = torch.from_numpy(np.vstack([s.next_state for s in samples if s is not None])).float().to(device)
+		dones = torch.from_numpy(np.vstack([s.done for s in samples if s is not None]).astype(np.uint8)).float().to(
+			device)
+
+		return states, actions, rewards, next_states, dones
+
+	def __len__(self):
+		"""Return the current size of internal memory."""
+		return self.replay_memory.tuple_length()
